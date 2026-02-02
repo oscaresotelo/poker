@@ -2,10 +2,14 @@ import streamlit as st
 import time
 import json
 import os
+import base64
 from datetime import timedelta
 
-# --- PERSISTENCIA ---
-DB_FILE = "poker_pro_config.json"
+# --- CONFIGURACIÓN DE PÁGINA ---
+st.set_page_config(page_title="POKER CLOCK ELITE", layout="wide", initial_sidebar_state="expanded")
+
+# --- PERSISTENCIA DE DATOS ---
+DB_FILE = "poker_data.json"
 
 def save_db(data):
     with open(DB_FILE, 'w') as f:
@@ -13,166 +17,178 @@ def save_db(data):
 
 def load_db():
     if os.path.exists(DB_FILE):
-        return json.load(f) if (f := open(DB_FILE, 'r')) else None
+        try:
+            with open(DB_FILE, 'r') as f:
+                return json.load(f)
+        except: return None
     return None
 
-# --- CONFIGURACIÓN DE PÁGINA ---
-st.set_page_config(page_title="POKER CLOCK PRO", layout="wide", initial_sidebar_state="collapsed")
-
-# --- ESTILOS CSS PARA PROYECCIÓN ---
+# --- ESTILOS CSS (DISEÑO PARA PROYECTOR) ---
 st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700&family=Roboto:wght@400;900&display=swap');
     
-    .main { background-color: #0E1117; }
-    .stApp { background-color: #0E1117; }
+    .stApp { background-color: #050505; }
     
-    .big-timer {
+    .main-timer {
         font-family: 'Orbitron', sans-serif;
-        font-size: 180px !important;
+        font-size: 160px !important;
         font-weight: 700;
         color: #00FF41;
         text-align: center;
-        text-shadow: 0 0 20px rgba(0, 255, 65, 0.5);
-        line-height: 1;
-        margin: 20px 0;
+        text-shadow: 0 0 30px rgba(0, 255, 65, 0.4);
+        margin: -20px 0;
     }
-    .blind-label { font-size: 30px; color: #888; text-transform: uppercase; margin-bottom: -10px; }
-    .blind-value { font-size: 70px; font-weight: bold; color: white; }
-    .next-lvl { color: #FFA500; font-size: 20px; border-top: 1px solid #333; padding-top: 10px; }
-    .prizepool-card {
-        background: linear-gradient(135deg, #1e1e1e 0%, #111 100%);
-        padding: 20px;
+    
+    .blind-box {
+        background: #111;
+        border: 2px solid #333;
         border-radius: 15px;
-        border: 1px solid #333;
+        padding: 20px;
+        text-align: center;
     }
+    
+    .label { color: #888; font-size: 24px; font-weight: bold; text-transform: uppercase; }
+    .value { color: white; font-size: 60px; font-weight: 900; }
+    .next-info { color: #FFA500; font-size: 22px; text-align: center; margin-top: 10px; font-family: 'Roboto'; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- INICIALIZACIÓN DE ESTADO ---
+# --- FUNCIÓN DE ALARMA ---
+def play_alarm():
+    # Sonido de campana de boxeo en base64 para evitar archivos externos
+    audio_html = """
+        <audio autoplay>
+            <source src="https://www.soundjay.com/misc/sounds/bell-ringing-05.mp3" type="audio/mp3">
+        </audio>
+    """
+    st.markdown(audio_html, unsafe_allow_html=True)
+
+# --- INICIALIZACIÓN ---
 if 'data' not in st.session_state:
     db = load_db()
     st.session_state.data = db if db else {
-        "levels": [{"m": 15, "sb": 100, "bb": 200, "a": 0}],
-        "players": [],
+        "levels": [
+            {"m": 15, "sb": 100, "bb": 200, "a": 0},
+            {"m": 15, "sb": 200, "bb": 400, "a": 0},
+            {"m": 15, "sb": 300, "bb": 600, "a": 100}
+        ],
+        "players": "Jugador 1\nJugador 2\nJugador 3",
         "buyin": 50,
         "curr_idx": 0
     }
 
 if 'running' not in st.session_state: st.session_state.running = False
-if 'time_left' not in st.session_state: 
-    st.session_state.time_left = st.session_state.data["levels"][0]["m"] * 60
-
-# --- LÓGICA DE NAVEGACIÓN ---
-menu = st.sidebar.radio("Navegación", ["📺 Pantalla Principal", "🛠️ Configuración", "👥 Jugadores y Premios"])
-
-# --- SECCIÓN 1: PANTALLA PRINCIPAL (LA QUE SE PROYECTA) ---
-if menu == "📺 Pantalla Principal":
+if 'time_left' not in st.session_state:
     idx = st.session_state.data["curr_idx"]
-    lvl = st.session_state.data["levels"][idx]
+    st.session_state.time_left = st.session_state.data["levels"][idx]["m"] * 60
+
+# --- SIDEBAR (PANEL DE CONTROL) ---
+with st.sidebar:
+    st.title("♣️ CONTROL")
+    mode = st.radio("Sección", ["Proyección", "Configuración"])
     
-    # Fila Superior: Info de Ciegas
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.markdown(f'<p class="blind-label">Ciega Chica</p><p class="blind-value">{lvl["sb"]}</p>', unsafe_allow_html=True)
-    with c2:
-        st.markdown(f'<p class="blind-label" style="text-align:center">Ciega Grande</p><p class="blind-value" style="text-align:center">{lvl["bb"]}</p>', unsafe_allow_html=True)
-    with c3:
-        st.markdown(f'<p class="blind-label" style="text-align:right">Ante</p><p class="blind-value" style="text-align:right">{lvl["a"]}</p>', unsafe_allow_html=True)
-
-    # Reloj Central
-    timer_place = st.empty()
-    
-    # Fila Inferior: Siguiente Nivel y Stats
-    st.markdown("<br>", unsafe_allow_html=True)
-    inf1, inf2, inf3 = st.columns(3)
-    
-    with inf1:
-        total_p = len(st.session_state.data["players"])
-        st.subheader(f"👥 Jugadores: {total_p}")
-    
-    with inf2:
-        if st.button("▶️/⏸️", use_container_width=True):
-            st.session_state.running = not st.session_state.running
-            st.rerun()
-
-    with inf3:
-        if idx + 1 < len(st.session_state.data["levels"]):
-            nxt = st.session_state.data["levels"][idx+1]
-            st.markdown(f'<p class="next-lvl">PRÓXIMO: {nxt["sb"]}/{nxt["bb"]} (Ante {nxt["a"]})</p>', unsafe_allow_html=True)
-
-    # Bucle del Timer
-    while st.session_state.running and st.session_state.time_left > 0:
-        st.session_state.time_left -= 1
-        m, s = divmod(st.session_state.time_left, 60)
-        timer_place.markdown(f'<p class="big-timer">{m:02d}:{s:02d}</p>', unsafe_allow_html=True)
-        time.sleep(1)
-        if st.session_state.time_left <= 0:
-            st.session_state.running = False
-            st.rerun()
-
-    if not st.session_state.running:
-        m, s = divmod(st.session_state.time_left, 60)
-        color = "#666" if st.session_state.time_left > 0 else "#FF4B4B"
-        timer_place.markdown(f'<p class="big-timer" style="color: {color}">{m:02d}:{s:02d}</p>', unsafe_allow_html=True)
-
-# --- SECCIÓN 2: CONFIGURACIÓN ---
-elif menu == "🛠️ Configuración":
-    st.header("🛠️ Estructura del Torneo")
-    
-    if st.button("💾 Guardar Configuración"):
-        save_db(st.session_state.data)
-        st.success("¡Configuración guardada!")
-
-    # Editar Niveles
-    new_levels = []
-    for i, l in enumerate(st.session_state.data["levels"]):
-        with st.expander(f"Nivel {i+1}", expanded=True):
-            col = st.columns(4)
-            m = col[0].number_input("Minutos", value=l["m"], key=f"m{i}")
-            sb = col[1].number_input("SB", value=l["sb"], key=f"sb{i}")
-            bb = col[2].number_input("BB", value=l["bb"], key=f"bb{i}")
-            a = col[3].number_input("Ante", value=l["a"], key=f"a{i}")
-            new_levels.append({"m": m, "sb": sb, "bb": bb, "a": a})
-    st.session_state.data["levels"] = new_levels
-
-    if st.button("➕ Añadir"):
-        st.session_state.data["levels"].append({"m": 15, "sb": 0, "bb": 0, "a": 0})
-        st.rerun()
-
     st.divider()
-    if st.button("⏭️ Saltar al Siguiente Nivel"):
+    if st.button("▶️ / ⏸️ INICIAR-PAUSAR", use_container_width=True):
+        st.session_state.running = not st.session_state.running
+        st.rerun()
+    
+    if st.button("⏭️ SIGUIENTE NIVEL", use_container_width=True):
         if st.session_state.data["curr_idx"] < len(st.session_state.data["levels"]) - 1:
             st.session_state.data["curr_idx"] += 1
-            idx = st.session_state.data["curr_idx"]
-            st.session_state.time_left = st.session_state.data["levels"][idx]["m"] * 60
+            new_idx = st.session_state.data["curr_idx"]
+            st.session_state.time_left = st.session_state.data["levels"][new_idx]["m"] * 60
             st.rerun()
 
-# --- SECCIÓN 3: JUGADORES Y PREMIOS ---
-else:
-    st.header("👥 Gestión de Mesa")
+    if st.button("🔄 REINICIAR RELOJ", use_container_width=True):
+        curr_idx = st.session_state.data["curr_idx"]
+        st.session_state.time_left = st.session_state.data["levels"][curr_idx]["m"] * 60
+        st.session_state.running = False
+        st.rerun()
+
+# --- VISTA: CONFIGURACIÓN ---
+if mode == "Configuración":
+    st.header("⚙️ Configuración del Torneo")
     
-    col_j, col_p = st.columns(2)
+    col_l, col_p = st.columns([2, 1])
     
-    with col_j:
-        st.subheader("Lista de Inscritos")
-        raw_names = st.text_area("Pega nombres (uno por línea)", 
-                                value="\n".join(st.session_state.data["players"]), height=200)
-        if st.button("Actualizar Lista"):
-            st.session_state.data["players"] = [n.strip() for n in raw_names.split("\n") if n.strip()]
+    with col_l:
+        st.subheader("Niveles y Tiempos")
+        updated_levels = []
+        for i, lvl in enumerate(st.session_state.data["levels"]):
+            with st.expander(f"Nivel {i+1}", expanded=True):
+                c1, c2, c3, c4 = st.columns(4)
+                m = c1.number_input("Minutos", value=lvl["m"], key=f"m{i}")
+                s = c2.number_input("SB", value=lvl["sb"], key=f"s{i}")
+                b = c3.number_input("BB", value=lvl["bb"], key=f"b{i}")
+                a = c4.number_input("Ante", value=lvl["a"], key=f"a{i}")
+                updated_levels.append({"m": m, "sb": s, "bb": b, "a": a})
+        
+        if st.button("➕ Añadir Nivel"):
+            st.session_state.data["levels"].append({"m": 15, "sb": 0, "bb": 0, "a": 0})
             st.rerun()
 
     with col_p:
-        st.subheader("💰 Prizepool")
+        st.subheader("Jugadores y Costos")
         buyin = st.number_input("Buy-in ($)", value=st.session_state.data["buyin"])
+        p_list = st.text_area("Lista (uno por línea)", value=st.session_state.data["players"], height=250)
+    
+    if st.button("💾 GUARDAR TODO Y REINICIAR", use_container_width=True):
+        st.session_state.data["levels"] = updated_levels
+        st.session_state.data["players"] = p_list
         st.session_state.data["buyin"] = buyin
-        
-        total_pot = len(st.session_state.data["players"]) * buyin
-        st.markdown(f"""
-            <div class="prizepool-card">
-                <h3>Total: ${total_pot}</h3>
-                <p>🥇 1º (50%): ${total_pot * 0.5:,.0f}</p>
-                <p>🥈 2º (30%): ${total_pot * 0.3:,.0f}</p>
-                <p>🥉 3º (20%): ${total_pot * 0.2:,.0f}</p>
-            </div>
-        """, unsafe_allow_html=True)
+        st.session_state.data["curr_idx"] = 0
+        st.session_state.time_left = updated_levels[0]["m"] * 60
+        save_db(st.session_state.data)
+        st.success("Configuración guardada.")
+        st.rerun()
+
+# --- VISTA: PROYECCIÓN ---
+else:
+    idx = st.session_state.data["curr_idx"]
+    curr = st.session_state.data["levels"][idx]
+    lista_j = [j.strip() for j in st.session_state.data["players"].split("\n") if j.strip()]
+    
+    # Encabezado: Ciegas
+    st.markdown("<br>", unsafe_allow_html=True)
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.markdown(f'<div class="blind-box"><p class="label">Small Blind</p><p class="value">{curr["sb"]}</p></div>', unsafe_allow_html=True)
+    with c2:
+        st.markdown(f'<div class="blind-box"><p class="label">Big Blind</p><p class="value">{curr["bb"]}</p></div>', unsafe_allow_html=True)
+    with c3:
+        st.markdown(f'<div class="blind-box"><p class="label">Ante</p><p class="value">{curr["a"]}</p></div>', unsafe_allow_html=True)
+
+    # El Reloj Gigante
+    timer_placeholder = st.empty()
+    
+    # Info de Jugadores y Premios
+    st.divider()
+    inf1, inf2, inf3 = st.columns(3)
+    with inf1:
+        st.metric("JUGADORES", len(lista_j))
+    with inf2:
+        total_pot = len(lista_j) * st.session_state.data["buyin"]
+        st.metric("POT TOTAL", f"${total_pot}")
+    with inf3:
+        if idx + 1 < len(st.session_state.data["levels"]):
+            nxt = st.session_state.data["levels"][idx+1]
+            st.markdown(f'<p class="next-info">PRÓXIMO NIVEL: {nxt["sb"]} / {nxt["bb"]} (Ante {nxt["a"]})</p>', unsafe_allow_html=True)
+
+    # Bucle del Tiempo
+    while st.session_state.running and st.session_state.time_left > 0:
+        st.session_state.time_left -= 1
+        m, s = divmod(st.session_state.time_left, 60)
+        timer_placeholder.markdown(f'<p class="main-timer">{m:02d}:{s:02d}</p>', unsafe_allow_html=True)
+        time.sleep(1)
+        if st.session_state.time_left <= 0:
+            st.session_state.running = False
+            play_alarm()
+            st.balloons()
+            st.rerun()
+
+    # Estado estático
+    if not st.session_state.running:
+        m, s = divmod(st.session_state.time_left, 60)
+        color = "#666" if st.session_state.time_left > 0 else "#FF4B4B"
+        timer_placeholder.markdown(f'<p class="main-timer" style="color: {color}">{m:02d}:{s:02d}</p>', unsafe_allow_html=True)
